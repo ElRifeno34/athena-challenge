@@ -13,7 +13,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/ElRifeno34/athena-challenge/issues"
   },
@@ -23,4 +23,3 @@
     "express": "^5.2.1"
   }
 }
-

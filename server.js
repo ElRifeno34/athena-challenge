@@ -7,87 +7,96 @@ const app = express();
 app.use(express.json());
 
 function createServer() {
-  const server = new McpServer({
-    name: "crypto-monitor",
-    version: "1.0.0",
-  });
+  const server = new McpServer({ name: "vuln-explorer", version: "1.0.0" });
 
   server.tool(
-    "get_crypto_data",
-    "Fetches real-time cryptocurrency market data",
+    "get_vulnerabilities",
+    "Fetches real CVE vulnerability data from NVD by keyword, severity or vendor",
     {
-      coins: z.string().describe("Comma-separated coin ids e.g. bitcoin,ethereum,solana"),
-      currency: z.string().default("usd").describe("Currency: usd, eur, cad"),
+      keyword: z.string().describe("Search keyword e.g. microsoft, apache, linux"),
+      severity: z.string().default("").describe("Filter by severity: CRITICAL, HIGH, MEDIUM, LOW or empty for all"),
     },
-    async ({ coins, currency }) => {
+    async ({ keyword, severity }) => {
       try {
-        const response = await fetch(
-          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=${currency}&ids=${coins}&order=market_cap_desc&sparkline=false&price_change_percentage=1h,24h,7d`
-        );
+        let url = `https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${encodeURIComponent(keyword)}&resultsPerPage=10`;
+        if (severity) url += `&cvssV3Severity=${severity}`;
+
+        const response = await fetch(url, {
+          headers: { "User-Agent": "athena-vuln-explorer/1.0" }
+        });
         const data = await response.json();
+        const vulns = data.vulnerabilities || [];
 
         const html = `<!DOCTYPE html>
 <html>
 <head>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui; padding: 16px; }
-h2 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+body { font-family: system-ui; padding: 16px; font-size: 13px; }
+h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
 .row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
-select, .btn { padding: 6px 12px; border-radius: 20px; border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer; font-size: 13px; }
+.btn { padding: 5px 12px; border-radius: 20px; border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer; font-size: 12px; }
 .btn.active, .btn:hover { background: #6366f1; color: white; border-color: #6366f1; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
-td { padding: 10px 8px; border-bottom: 1px solid #f3f4f6; }
-tr:hover { background: #f9fafb; }
+.card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+.card:hover { background: #f9fafb; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+.CRITICAL { background: #fee2e2; color: #dc2626; }
+.HIGH { background: #ffedd5; color: #ea580c; }
+.MEDIUM { background: #fef9c3; color: #ca8a04; }
+.LOW { background: #dcfce7; color: #16a34a; }
+.detail { display: none; margin-top: 8px; color: #6b7280; line-height: 1.5; }
+.cve-id { font-weight: 700; color: #6366f1; }
+.count { color: #6b7280; font-size: 12px; margin-bottom: 8px; }
+input { padding: 6px 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 12px; width: 150px; }
 </style>
 </head>
 <body>
-<h2>🪙 Crypto Market Monitor</h2>
+<h2>🔐 Vulnerability Explorer — ${keyword}</h2>
+<div class="count">${vulns.length} CVEs found</div>
 <div class="row">
-  <select id="sort" onchange="render()">
-    <option value="market_cap">Market Cap</option>
-    <option value="price">Price</option>
-    <option value="change24h">24h Change</option>
-    <option value="volume">Volume</option>
-  </select>
-  <button class="btn active" onclick="filter('all',this)">All</button>
-  <button class="btn" onclick="filter('gainers',this)">🟢 Gainers</button>
-  <button class="btn" onclick="filter('losers',this)">🔴 Losers</button>
+  <span>Filter:</span>
+  <button class="btn active" onclick="filter('ALL',this)">All</button>
+  <button class="btn" onclick="filter('CRITICAL',this)">🔴 Critical</button>
+  <button class="btn" onclick="filter('HIGH',this)">🟠 High</button>
+  <button class="btn" onclick="filter('MEDIUM',this)">🟡 Medium</button>
+  <button class="btn" onclick="filter('LOW',this)">🟢 Low</button>
+  <input id="search" placeholder="Search CVE..." oninput="render()" />
 </div>
-<table>
-  <thead><tr><th>Asset</th><th>Price</th><th>1h%</th><th>24h%</th><th>7d%</th><th>Mkt Cap</th><th>Volume</th></tr></thead>
-  <tbody id="body"></tbody>
-</table>
+<div id="list"></div>
 <script>
-const D = ${JSON.stringify(data)};
-let f = 'all';
-function filter(t, b) { f=t; document.querySelectorAll('.btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render(); }
+const D = ${JSON.stringify(vulns)};
+let currentFilter = 'ALL';
+function getSeverity(v) {
+  try { return v.cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseSeverity || v.cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseSeverity || 'N/A'; } catch(e) { return 'N/A'; }
+}
+function getScore(v) {
+  try { return v.cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || v.cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 'N/A'; } catch(e) { return 'N/A'; }
+}
+function filter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+function toggle(id) {
+  const el = document.getElementById('detail-'+id);
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
 function render() {
-  const s = document.getElementById('sort').value;
+  const search = document.getElementById('search').value.toLowerCase();
   let d = [...D];
-  if(f==='gainers') d=d.filter(c=>c.price_change_percentage_24h>0);
-  if(f==='losers') d=d.filter(c=>c.price_change_percentage_24h<0);
-  d.sort((a,b)=>{
-    if(s==='price') return b.current_price-a.current_price;
-    if(s==='change24h') return b.price_change_percentage_24h-a.price_change_percentage_24h;
-    if(s==='volume') return b.total_volume-a.total_volume;
-    return b.market_cap-a.market_cap;
-  });
-  document.getElementById('body').innerHTML=d.map(c=>{
-    const c24=(c.price_change_percentage_24h||0).toFixed(2);
-    const c7=(c.price_change_percentage_7d_in_currency||0).toFixed(2);
-    const c1=(c.price_change_percentage_1h_in_currency||0).toFixed(2);
-    return \`<tr>
-      <td><div style="display:flex;align-items:center;gap:6px"><img src="\${c.image}" width="20" height="20" style="border-radius:50%"/><strong>\${c.name}</strong><span style="color:#9ca3af;font-size:11px">\${c.symbol.toUpperCase()}</span></div></td>
-      <td><strong>$\${c.current_price.toLocaleString()}</strong></td>
-      <td style="color:\${c1>=0?'#16a34a':'#dc2626'}">\${c1}%</td>
-      <td style="color:\${c24>=0?'#16a34a':'#dc2626'}">\${c24}%</td>
-      <td style="color:\${c7>=0?'#16a34a':'#dc2626'}">\${c7}%</td>
-      <td>$\${(c.market_cap/1e9).toFixed(2)}B</td>
-      <td>$\${(c.total_volume/1e9).toFixed(2)}B</td>
-    </tr>\`;
-  }).join('');
+  if(currentFilter !== 'ALL') d = d.filter(v => getSeverity(v) === currentFilter);
+  if(search) d = d.filter(v => v.cve.id.toLowerCase().includes(search) || (v.cve.descriptions?.[0]?.value||'').toLowerCase().includes(search));
+  document.getElementById('list').innerHTML = d.map((v,i) => {
+    const sev = getSeverity(v);
+    const score = getScore(v);
+    const desc = v.cve.descriptions?.[0]?.value || 'No description';
+    const published = v.cve.published?.split('T')[0] || '';
+    return \`<div class="card" onclick="toggle(\${i})">
+      <div><span class="cve-id">\${v.cve.id}</span><span class="badge \${sev}">\${sev} \${score}</span><span style="float:right;color:#9ca3af">\${published}</span></div>
+      <div id="detail-\${i}" class="detail">\${desc}</div>
+    </div>\`;
+  }).join('') || '<p style="color:#9ca3af">No results</p>';
 }
 render();
 </script>
@@ -98,7 +107,7 @@ render();
           content: [{
             type: "resource",
             resource: {
-              uri: "ui://widget/crypto",
+              uri: "ui://widget/vulns",
               mimeType: "text/html+skybridge",
               text: html,
             },
@@ -113,18 +122,14 @@ render();
 }
 
 const transports = {};
-
 app.post("/mcp", async (req, res) => {
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => Math.random().toString(36).slice(2),
-  });
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => Math.random().toString(36).slice(2) });
   const server = createServer();
   transports[transport.sessionId] = transport;
   res.on("close", () => delete transports[transport.sessionId]);
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
-
 app.get("/mcp", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"];
   if (!sessionId) return res.status(200).json({ status: "ok" });
@@ -132,12 +137,10 @@ app.get("/mcp", async (req, res) => {
   if (!transport) return res.status(404).send("Session not found");
   await transport.handleRequest(req, res);
 });
-
 app.delete("/mcp", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"];
   const transport = transports[sessionId];
   if (!transport) return res.status(404).send("Session not found");
   await transport.handleRequest(req, res);
 });
-
 app.listen(3000, () => console.log(`MCP server running on http://localhost:3000/mcp`));
