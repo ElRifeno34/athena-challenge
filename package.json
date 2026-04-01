@@ -1,0 +1,26 @@
+{
+  "name": "athena-challenge",
+  "version": "1.0.0",
+  "description": "��#\u0000 \u0000a\u0000t\u0000h\u0000e\u0000n\u0000a\u0000-\u0000c\u0000h\u0000a\u0000l\u0000l\u0000e\u0000n\u0000g\u0000e\u0000\r\u0000 \u0000",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ElRifeno34/athena-challenge.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ElRifeno34/athena-challenge/issues"
+  },
+  "homepage": "https://github.com/ElRifeno34/athena-challenge#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1"
+  }
+}
+
